@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser()
 # Training
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--growing', action='store_true', help='enables progressive growing during training')
+parser.add_argument('--image_size', type=int, default=32, help='size of image')
 parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train for')
 parser.add_argument('--epoch_size', type=int, default=300, help='number of data points in an epoch')
@@ -40,13 +41,14 @@ def PhysicalLoss():
         return F.conv2d(img, kernel).abs().mean()
     return loss
 
-net = UNet(dtype).type(dtype)
+net = UNet(dtype, opt.image_size).type(dtype)
+print(net)
 
 physical_loss = PhysicalLoss()
 optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
 
 ## Training loop
-data = torch.zeros(opt.batch_size,1,32,32)
+data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
 for epoch in range(opt.epochs):
     for sample in range(opt.epoch_size):
         data[:,:,:,0] = np.random.uniform(100)
