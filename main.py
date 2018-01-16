@@ -5,8 +5,12 @@ import torchvision.datasets as dset
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision.utils import save_image
+
 import argparse
+import os
+
 import numpy as np
+import matplotlib.pyplot as plt
 
 from networks import UNet
 
@@ -25,6 +29,11 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 
 opt = parser.parse_args()
 print(opt)
+
+# Make output directory
+os.makedirs(opt.experiment, exist_ok=True)
+with open(os.path.join(opt.experiment, 'config.txt'), 'w') as f:
+    f.write(str(opt))
 
 # Set up CUDA
 if opt.cuda and torch.cuda.is_available():
@@ -47,6 +56,20 @@ print(net)
 physical_loss = PhysicalLoss()
 optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
 
+fixed_sample_0 = torch.zeros(1,1,opt.image_size,opt.image_size)
+fixed_sample_0[:,:,:,0] = 100
+fixed_sample_0[:,:,0,:] = 0
+fixed_sample_0[:,:,:,-1] = 100
+fixed_sample_0[:,:,-1,:] = 0
+fixed_sample_0 = Variable(fixed_sample_0).cuda()
+
+fixed_sample_1 = torch.zeros(1,1,opt.image_size,opt.image_size)
+fixed_sample_1[:,:,:,0] = 100
+fixed_sample_1[:,:,0,:] = 100
+fixed_sample_1[:,:,:,-1] = 100
+fixed_sample_1[:,:,-1,:] = 100
+fixed_sample_1 = Variable(fixed_sample_1).cuda()
+
 ## Training loop
 data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
 for epoch in range(opt.epochs):
@@ -63,4 +86,23 @@ for epoch in range(opt.epochs):
         optimizer.step()
     print('epoch [{}/{}], loss:{:.4f}'
           .format(epoch+1, opt.epochs, loss.data[0]))
+
+    # Plot real samples
+    plt.figure(figsize=(20, 15))
+    f_0 = net(fixed_sample_0)
+    f_1 = net(fixed_sample_1)
+    plt.subplot(1,2,1)
+    XX, YY = np.meshgrid(np.arange(0, opt.image_size), np.arange(0, opt.image_size))
+    plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
+    plt.axis('equal')
+    plt.subplot(1,2,2)
+    plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
+    plt.axis('equal')
+    plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
+    plt.close()
+
+    # checkpoint networks
+    if epoch % 5 == 0:
+        torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
+
 
