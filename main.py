@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from networks import UNet
+from solve import solve
 
 parser = argparse.ArgumentParser()
 
@@ -70,6 +71,15 @@ fixed_sample_1[:,:,:,-1] = 100
 fixed_sample_1[:,:,-1,:] = 100
 fixed_sample_1 = Variable(fixed_sample_1).cuda()
 
+boundary = np.zeros((opt.image_size, opt.image_size), dtype=np.bool)
+boundary[0,:] = True
+boundary[-1,:] = True
+boundary[:,0] = True
+boundary[:,-1] = True
+
+fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary)
+fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary)
+
 ## Training loop
 data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
 for epoch in range(opt.epochs):
@@ -91,12 +101,18 @@ for epoch in range(opt.epochs):
     plt.figure(figsize=(20, 15))
     f_0 = net(fixed_sample_0)
     f_1 = net(fixed_sample_1)
-    plt.subplot(1,2,1)
     XX, YY = np.meshgrid(np.arange(0, opt.image_size), np.arange(0, opt.image_size))
+    plt.subplot(2,2,1)
     plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
     plt.axis('equal')
-    plt.subplot(1,2,2)
+    plt.subplot(2,2,2)
     plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
+    plt.axis('equal')
+    plt.subplot(2,2,3)
+    plt.contourf(XX, YY, fixed_solution_0, colorinterpolation=50, cmap=plt.cm.jet)
+    plt.axis('equal')
+    plt.subplot(2,2,4)
+    plt.contourf(XX, YY, fixed_solution_1, colorinterpolation=50, cmap=plt.cm.jet)
     plt.axis('equal')
     plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
     plt.close()
