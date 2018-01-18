@@ -12,8 +12,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from networks import UNet
+from networks import UNet, GrowingUNet
 from solve import solve
+
+import ipdb
 
 parser = argparse.ArgumentParser()
 
@@ -21,8 +23,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--growing', action='store_true', help='enables progressive growing during training')
 parser.add_argument('--image_size', type=int, default=32, help='size of image')
+parser.add_argument('--start_size', type=int, default=4, help='starting size of image for growing')
 parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
-parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train for')
+parser.add_argument('--epochs', type=int, default=128, help='number of epochs to train for')
 parser.add_argument('--epoch_size', type=int, default=300, help='number of data points in an epoch')
 parser.add_argument('--learning_rate', type=float, default=2e-4, help='learning rate, default=2e-4')
 parser.add_argument('--experiment', default='run0', help='folder to output images and model checkpoints')
@@ -51,74 +54,100 @@ def PhysicalLoss():
         return F.conv2d(img, kernel).abs().mean()
     return loss
 
-net = UNet(dtype, opt.image_size).type(dtype)
+if not opt.growing:
+    opt.start_size = opt.image_size
+
+net = GrowingUNet(dtype, image_size=opt.image_size, start_size=opt.start_size).type(dtype)
 print(net)
 
 physical_loss = PhysicalLoss()
 optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
 
-fixed_sample_0 = torch.zeros(1,1,opt.image_size,opt.image_size)
-fixed_sample_0[:,:,:,0] = 100
-fixed_sample_0[:,:,0,:] = 0
-fixed_sample_0[:,:,:,-1] = 100
-fixed_sample_0[:,:,-1,:] = 0
-fixed_sample_0 = Variable(fixed_sample_0).cuda()
+## Outer training loop
+size = opt.start_size
+epoch = 0
+num_stages = int(np.log2(opt.image_size) - np.log2(opt.start_size)) + 1
+stage = 0
 
-fixed_sample_1 = torch.zeros(1,1,opt.image_size,opt.image_size)
-fixed_sample_1[:,:,:,0] = 100
-fixed_sample_1[:,:,0,:] = 100
-fixed_sample_1[:,:,:,-1] = 100
-fixed_sample_1[:,:,-1,:] = 100
-fixed_sample_1 = Variable(fixed_sample_1).cuda()
+while True:
+    if num_stages >= 1:
+        epochs = int(opt.epochs*2**(-1*(num_stages-stage)))
+    else:
+        epochs = opt.num_epochs
 
-boundary = np.zeros((opt.image_size, opt.image_size), dtype=np.bool)
-boundary[0,:] = True
-boundary[-1,:] = True
-boundary[:,0] = True
-boundary[:,-1] = True
+    fixed_sample_0 = torch.zeros(1,1,size,size)
+    fixed_sample_0[:,:,:,0] = 100
+    fixed_sample_0[:,:,0,:] = 0
+    fixed_sample_0[:,:,:,-1] = 100
+    fixed_sample_0[:,:,-1,:] = 0
+    fixed_sample_0 = Variable(fixed_sample_0).cuda()
 
-fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary)
-fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary)
+    fixed_sample_1 = torch.zeros(1,1,size,size)
+    fixed_sample_1[:,:,:,0] = 100
+    fixed_sample_1[:,:,0,:] = 100
+    fixed_sample_1[:,:,:,-1] = 100
+    fixed_sample_1[:,:,-1,:] = 100
+    fixed_sample_1 = Variable(fixed_sample_1).cuda()
 
-## Training loop
-data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
-for epoch in range(opt.epochs):
-    for sample in range(opt.epoch_size):
-        data[:,:,:,0] = np.random.uniform(100)
-        data[:,:,0,:] = np.random.uniform(100)
-        data[:,:,:,-1] = np.random.uniform(100)
-        data[:,:,-1,:] = np.random.uniform(100)
-        img = Variable(data).type(dtype)
-        output = net(img)
-        loss = physical_loss(output)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    print('epoch [{}/{}], loss:{:.4f}'
-          .format(epoch+1, opt.epochs, loss.data[0]))
+    boundary = np.zeros((size, size), dtype=np.bool)
+    boundary[0,:] = True
+    boundary[-1,:] = True
+    boundary[:,0] = True
+    boundary[:,-1] = True
 
-    # Plot real samples
-    plt.figure(figsize=(20, 15))
-    f_0 = net(fixed_sample_0)
-    f_1 = net(fixed_sample_1)
-    XX, YY = np.meshgrid(np.arange(0, opt.image_size), np.arange(0, opt.image_size))
-    plt.subplot(2,2,1)
-    plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
-    plt.axis('equal')
-    plt.subplot(2,2,2)
-    plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, cmap=plt.cm.jet)
-    plt.axis('equal')
-    plt.subplot(2,2,3)
-    plt.contourf(XX, YY, fixed_solution_0, colorinterpolation=50, cmap=plt.cm.jet)
-    plt.axis('equal')
-    plt.subplot(2,2,4)
-    plt.contourf(XX, YY, fixed_solution_1, colorinterpolation=50, cmap=plt.cm.jet)
-    plt.axis('equal')
-    plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
-    plt.close()
+    fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary)
+    fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary)
 
-    # checkpoint networks
-    if epoch % 5 == 0:
-        torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
+    ## Inner training loop
+    data = torch.zeros(opt.batch_size,1,size,size)
+    #data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
+    for _epoch in range(epochs):
+        for sample in range(opt.epoch_size):
+            data[:,:,:,0] = np.random.uniform(100)
+            data[:,:,0,:] = np.random.uniform(100)
+            data[:,:,:,-1] = np.random.uniform(100)
+            data[:,:,-1,:] = np.random.uniform(100)
+            img = Variable(data).type(dtype)
+            output = net(img)
+            loss = physical_loss(output)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        print('epoch [{}/{}], size {}, loss:{:.4f}'
+              .format(epoch+1, opt.epochs, size, loss.data[0]))
+        epoch += 1
+
+        # Plot real samples
+        plt.figure(figsize=(20, 15))
+        f_0 = net(fixed_sample_0)
+        f_1 = net(fixed_sample_1)
+        XX, YY = np.meshgrid(np.arange(0, size), np.arange(0, size))
+        plt.subplot(2,2,1)
+        plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.axis('equal')
+        plt.subplot(2,2,2)
+        plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.axis('equal')
+        plt.subplot(2,2,3)
+        plt.contourf(XX, YY, fixed_solution_0, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.axis('equal')
+        plt.subplot(2,2,4)
+        plt.contourf(XX, YY, fixed_solution_1, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.axis('equal')
+        plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
+        plt.close()
+
+        # checkpoint networks
+        if epoch % 5 == 0:
+            torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
+
+        if epoch >= opt.epochs:
+            exit()
+
+    if size < opt.image_size:
+        size *= 2
+        net.setSize(size)
+        stage += 1
+
 
 
