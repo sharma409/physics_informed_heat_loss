@@ -4,6 +4,8 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import numpy as np
 
+from utils import setBoundaries
+
 import ipdb
 
 class UNet(nn.Module):
@@ -80,7 +82,7 @@ class UNet(nn.Module):
 
 
 class GrowingUNet(UNet):
-    """docstring for ProgressiveUNet"""
+
     def __init__(self, dtype, image_size=32, start_size=4, max_temp=100, num_filters=64):
         super(GrowingUNet, self).__init__(dtype, image_size, max_temp, num_filters)
         self.setSize(start_size)
@@ -143,3 +145,58 @@ class GrowingUNet(UNet):
             output = (decoded + 1)*self.max_temp / 2
             output = output*self.boundary_mask + input*self.center_mask
             return output
+
+
+class VariableLossUNet(UNet):
+
+    def __init__(self, dtype, image_size=32, max_temp=100, num_filters=64):
+        super(VariableLossUNet, self).__init__(dtype, image_size, max_temp, num_filters)
+        self.stage_deconvs = nn.ModuleList()
+        size = 4
+        self.num_stages = 0
+        while size < image_size:
+            num_channels = int(min(2**(np.log2(image_size)-np.log2(size)-1), 8)*self.num_filters)
+            deconv = nn.Conv2d(num_channels, 1, kernel_size=1)
+            self.stage_deconvs.append(deconv)
+            size *= 2
+            self.num_stages += 1
+
+        self.masks = [Variable(torch.zeros(1, 1, 2**i, 2**i)).type(self.dtype) for i in range(2,int(np.log2(self.image_size))+1)]
+        for mask in self.masks:
+            setBoundaries(mask,1,1,1,1)
+
+
+    def forward(self, inputs):
+        input = x = inputs[-1]
+        xs = []
+        # encoder
+        for i in range(len(self.encoding_layers)):
+            if i == 0:
+                x = F.leaky_relu(self.encoding_layers[i](x), 0.2)
+            elif i == len(self.encoding_layers)-1:
+                x = self.encoding_layers[i](x)
+            else:
+                x = F.leaky_relu(self.encoding_bns[i](self.encoding_layers[i](x)), 0.2)
+            xs.append(x)
+
+        # encoded representation is (batch_size, num_filters*8, 1, 1)-dimensional encoding space
+        self.encoded = xs.pop(-1)
+        
+        # decoder
+        outputs = []
+        for i in range(len(self.decoding_layers)):
+            if i == 0:
+                x = self.decoding_bns[i](self.decoding_layers[i](F.relu(x)))
+            elif i == len(self.decoding_layers)-1:
+                x = F.tanh(self.decoding_layers[i](F.relu(torch.cat((x,xs[0]), dim=1))))
+            else:
+                x = self.decoding_bns[i](self.decoding_layers[i](F.relu(torch.cat((x,xs[-1*i]), dim=1))))
+                decoded = F.tanh(self.stage_deconvs[i-1](x))
+                output = (decoded + 1)*self.max_temp / 2
+                output = output*(1-self.masks[i-1].type(self.dtype)) + inputs[i-1]*self.masks[i-1]
+                outputs.append(output)
+        decoded = x
+        output = (decoded + 1)*self.max_temp / 2
+        output = output*(1-self.masks[-1].type(self.dtype)) + input*self.masks[-1]
+        outputs.append(output)
+        return outputs

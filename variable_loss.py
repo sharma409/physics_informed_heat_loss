@@ -12,8 +12,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from networks import UNet, GrowingUNet
-from solve import solve
+from networks import UNet, GrowingUNet, VariableLossUNet
+from utils import setBoundaries, makeSamples
 
 import ipdb
 
@@ -21,7 +21,6 @@ parser = argparse.ArgumentParser()
 
 # Training
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
-parser.add_argument('--growing', action='store_true', help='enables progressive growing during training')
 parser.add_argument('--image_size', type=int, default=32, help='size of image')
 parser.add_argument('--start_size', type=int, default=4, help='starting size of image for growing')
 parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
@@ -54,10 +53,7 @@ def PhysicalLoss():
         return F.conv2d(img, kernel).abs().mean()
     return loss
 
-if not opt.growing:
-    opt.start_size = opt.image_size
-
-net = GrowingUNet(dtype, image_size=opt.image_size, start_size=opt.start_size).type(dtype)
+net = VariableLossUNet(dtype, image_size=opt.image_size).type(dtype)
 print(net)
 
 physical_loss = PhysicalLoss()
@@ -67,7 +63,20 @@ optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
 size = opt.start_size
 epoch = 0
 num_stages = int(np.log2(opt.image_size) - np.log2(opt.start_size)) + 1
+num_losses = int(np.log2(opt.image_size) - 2) + 1
+loss_weights = np.zeros(num_losses)
+loss_weights[int(np.log2(opt.start_size) - 2)] = 1
+for i in range(num_losses):
+    print ("loss weight: ", loss_weights[i], "image size: ", 4*2**i)
 stage = 0
+
+samps_0, sols_0, samps_1, sols_1 = makeSamples(opt.image_size)
+
+def weighted_loss(outputs, loss_weights):
+    loss = 0
+    for i in range(len(outputs)):
+        loss += physical_loss(outputs[i])*loss_weights[i]
+    return loss
 
 while True:
     if num_stages >= 1:
@@ -75,42 +84,19 @@ while True:
     else:
         epochs = opt.num_epochs
 
-    fixed_sample_0 = torch.zeros(1,1,size,size)
-    fixed_sample_0[:,:,:,0] = 100
-    fixed_sample_0[:,:,0,:] = 0
-    fixed_sample_0[:,:,:,-1] = 100
-    fixed_sample_0[:,:,-1,:] = 0
-    fixed_sample_0 = Variable(fixed_sample_0).cuda()
-
-    fixed_sample_1 = torch.zeros(1,1,size,size)
-    fixed_sample_1[:,:,:,0] = 100
-    fixed_sample_1[:,:,0,:] = 100
-    fixed_sample_1[:,:,:,-1] = 100
-    fixed_sample_1[:,:,-1,:] = 100
-    fixed_sample_1 = Variable(fixed_sample_1).cuda()
-
-    boundary = np.zeros((size, size), dtype=np.bool)
-    boundary[0,:] = True
-    boundary[-1,:] = True
-    boundary[:,0] = True
-    boundary[:,-1] = True
-
-    fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary)
-    fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary)
-    exit()
-
     ## Inner training loop
-    data = torch.zeros(opt.batch_size,1,size,size)
-    #data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
+    data = [Variable(torch.zeros(opt.batch_size, 1, 2**j, 2**j)).type(dtype) for j in range(2,int(np.log2(opt.image_size))+1)]
     for _epoch in range(epochs):
         for sample in range(opt.epoch_size):
-            data[:,:,:,0] = np.random.uniform(100)
-            data[:,:,0,:] = np.random.uniform(100)
-            data[:,:,:,-1] = np.random.uniform(100)
-            data[:,:,-1,:] = np.random.uniform(100)
-            img = Variable(data).type(dtype)
-            output = net(img)
-            loss = physical_loss(output)
+            top = np.random.uniform(100)
+            bottom = np.random.uniform(100)
+            left = np.random.uniform(100)
+            right = np.random.uniform(100)
+            for k, _ in enumerate(data):
+                setBoundaries(data[k], top, bottom, left, right)
+
+            outputs = net(data)
+            loss = weighted_loss(outputs, loss_weights)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -120,8 +106,8 @@ while True:
 
         # Plot real samples
         plt.figure(figsize=(20, 15))
-        f_0 = net(fixed_sample_0)
-        f_1 = net(fixed_sample_1)
+        f_0 = net(samps_0)[stage]
+        f_1 = net(samps_1)[stage]
         XX, YY = np.meshgrid(np.arange(0, size), np.arange(0, size))
         plt.subplot(2,2,1)
         plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
@@ -130,10 +116,10 @@ while True:
         plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.subplot(2,2,3)
-        plt.contourf(XX, YY, fixed_solution_0, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.contourf(XX, YY, sols_0[stage], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.subplot(2,2,4)
-        plt.contourf(XX, YY, fixed_solution_1, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.contourf(XX, YY, sols_1[stage], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
         plt.close()
@@ -145,10 +131,10 @@ while True:
         if epoch >= opt.epochs:
             exit()
 
-    if size < opt.image_size:
+    if loss_weights[-1] == 0:
         size *= 2
-        net.setSize(size)
+        loss_weights = np.roll(loss_weights, 1)
+        for i in range(num_losses):
+            print ("loss weight: ", loss_weights[i], "image size: ", 4*2**i)
         stage += 1
-
-
 
