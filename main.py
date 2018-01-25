@@ -95,9 +95,8 @@ while True:
     boundary[:,0] = True
     boundary[:,-1] = True
 
-    fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary)
-    fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary)
-    exit()
+    fixed_solution_0 = solve(fixed_sample_0.cpu().data.numpy()[0,0,:,:], boundary, tol=1e-4)
+    fixed_solution_1 = solve(fixed_sample_1.cpu().data.numpy()[0,0,:,:], boundary, tol=1e-4)
 
     ## Inner training loop
     data = torch.zeros(opt.batch_size,1,size,size)
