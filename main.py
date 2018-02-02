@@ -50,8 +50,18 @@ else:
 # Define physics loss
 def PhysicalLoss():
     kernel = Variable(torch.Tensor(np.array([[[[0, 1/4, 0], [1/4, -1, 1/4], [0, 1/4, 0]]]]))).type(dtype)
+    reductions = []
+    full_width = opt.image_size
+    reduced_width = full_width
+    while reduced_width > 32:
+        reduced_width /= 4
+        indices = np.round(np.linspace(0, full_width-1, reduced_width)).astype(np.int32)
+        reductions.append(np.ix_(indices, indices))
     def loss(img):
-        return F.conv2d(img, kernel).abs().mean()
+        loss = F.conv2d(img, kernel).abs().mean()
+        for rows, cols in reductions:
+            loss += F.conv2d(img[:,:,rows,cols], kernel).abs().mean()
+        return loss
     return loss
 
 if not opt.growing:
@@ -102,6 +112,7 @@ while True:
     data = torch.zeros(opt.batch_size,1,size,size)
     #data = torch.zeros(opt.batch_size,1,opt.image_size,opt.image_size)
     for _epoch in range(epochs):
+        mean_loss = 0
         for sample in range(opt.epoch_size):
             data[:,:,:,0] = np.random.uniform(100)
             data[:,:,0,:] = np.random.uniform(100)
@@ -113,26 +124,27 @@ while True:
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            mean_loss += loss.data[0]
+        mean_loss /= opt.epoch_size
         print('epoch [{}/{}], size {}, loss:{:.4f}'
-              .format(epoch+1, opt.epochs, size, loss.data[0]))
+              .format(epoch+1, opt.epochs, size, mean_loss))
         epoch += 1
 
         # Plot real samples
         plt.figure(figsize=(20, 15))
         f_0 = net(fixed_sample_0)
         f_1 = net(fixed_sample_1)
-        XX, YY = np.meshgrid(np.arange(0, size), np.arange(0, size))
         plt.subplot(2,2,1)
-        plt.contourf(XX, YY, f_0.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.imshow(f_0.cpu().data.numpy()[0,0,:,:], vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.subplot(2,2,2)
-        plt.contourf(XX, YY, f_1.cpu().data.numpy()[0,0,:,:], colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.imshow(f_1.cpu().data.numpy()[0,0,:,:], vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.subplot(2,2,3)
-        plt.contourf(XX, YY, fixed_solution_0, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.imshow(fixed_solution_0, vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.subplot(2,2,4)
-        plt.contourf(XX, YY, fixed_solution_1, colorinterpolation=50, vmin=0, vmax=100, cmap=plt.cm.jet)
+        plt.imshow(fixed_solution_1, vmin=0, vmax=100, cmap=plt.cm.jet)
         plt.axis('equal')
         plt.savefig('%s/f_1_epoch%d.png' % (opt.experiment, epoch))
         plt.close()
