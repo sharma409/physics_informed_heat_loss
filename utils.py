@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import numpy as np
+import torch.nn.functional as F
 
 from solve import solve
 
@@ -14,6 +15,14 @@ def setBoundaries(data, top, bottom, left, right):
     data[:,:,0,-1] = (top + right) / 2
     data[:,:,-1,0] = (bottom + left) / 2
     data[:,:,-1,-1] = (bottom + right) / 2
+
+
+# Define physics loss
+def PhysicalLoss(dtype):
+    kernel = Variable(torch.Tensor(np.array([[[[0, 1/4, 0], [1/4, -1, 1/4], [0, 1/4, 0]]]]))).type(dtype)
+    def loss(img):
+        return F.conv2d(img, kernel).abs().mean()
+    return loss
 
 
 def makeSamples(image_size):

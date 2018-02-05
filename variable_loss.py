@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from networks import UNet, GrowingUNet, VariableLossUNet
-from utils import setBoundaries, makeSamples
+from utils import setBoundaries, makeSamples, PhysicalLoss
 
 import ipdb
 
@@ -46,17 +46,11 @@ else:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
     dtype = torch.FloatTensor
 
-# Define physics loss
-def PhysicalLoss():
-    kernel = Variable(torch.Tensor(np.array([[[[0, 1/4, 0], [1/4, -1, 1/4], [0, 1/4, 0]]]]))).type(dtype)
-    def loss(img):
-        return F.conv2d(img, kernel).abs().mean()
-    return loss
 
 net = VariableLossUNet(dtype, image_size=opt.image_size).type(dtype)
 print(net)
 
-physical_loss = PhysicalLoss()
+physical_loss = PhysicalLoss(dtype)
 optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
 
 ## Outer training loop
@@ -125,10 +119,11 @@ while True:
         plt.close()
 
         # checkpoint networks
-        if epoch % 5 == 0:
+        if epoch % 100 == 0:
             torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
 
         if epoch >= opt.epochs:
+            torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
             exit()
 
     if loss_weights[-1] == 0:

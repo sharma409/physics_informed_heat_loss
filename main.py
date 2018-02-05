@@ -138,10 +138,11 @@ while True:
         plt.close()
 
         # checkpoint networks
-        if epoch % 5 == 0:
+        if epoch % 50 == 0:
             torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
 
         if epoch >= opt.epochs:
+            torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.experiment, epoch))
             exit()
 
     if size < opt.image_size:
