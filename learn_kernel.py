@@ -6,9 +6,23 @@ import torch.nn.functional as F
 import numpy as np
 
 from solve import solve
-import ipdb
+import argparse
 
-dtype = torch.cuda.FloatTensor
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--cuda', action='store_true', help='enables cuda')
+parser.add_argument('--size', type=int, default=32, help='size of image')
+
+opt = parser.parse_args()
+print(opt)
+
+# Set up CUDA
+if opt.cuda and torch.cuda.is_available():
+    dtype = torch.cuda.FloatTensor
+else:
+    if torch.cuda.is_available():
+        print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+    dtype = torch.FloatTensor
 
 class kernel(nn.Module):
     # UNet for Heat Transport
@@ -31,14 +45,12 @@ learning_rate = 2e-4
 optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 physical_loss = PhysicalLoss()
 
-size = 8
-
-boundary = np.zeros((size, size), dtype=np.bool)
+boundary = np.zeros((opt.size, opt.size), dtype=np.bool)
 boundary[0,:] = True
 boundary[-1,:] = True
 boundary[:,0] = True
 boundary[:,-1] = True
-data = torch.zeros(1,1,size,size)
+data = torch.zeros(1,1,opt.size,opt.size)
 i = 0
 while True:
     i += 1

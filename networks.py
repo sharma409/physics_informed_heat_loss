@@ -6,8 +6,6 @@ import numpy as np
 
 from utils import setBoundaries
 
-import ipdb
-
 class UNet(nn.Module):
     # UNet for Heat Transport
     def __init__(self, dtype, image_size=32, max_temp=100, num_filters=64):

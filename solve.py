@@ -30,8 +30,8 @@ def solve(initial, fixed, tol=1e-15):
         array = zoom(small_solution, 4.0)
     else:
         # As the initial guess, just set the whole array to the average of all fixed elements.
-
         array = np.ones(initial.shape) * np.mean(fixed_values)
+
     array[fixed] = fixed_values
 
     # Iterate until convergence is reached.
