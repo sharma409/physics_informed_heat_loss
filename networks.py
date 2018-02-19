@@ -27,7 +27,7 @@ class UNet(nn.Module):
             else:
                 self.encoding_layers.append(nn.Conv2d(min(2**(i-1),8)*num_filters, min(2**i, 8)*num_filters, kernel_size=4, stride=2, padding=1))
             self.encoding_bns.append(nn.BatchNorm2d(min(2**i*num_filters, 8*num_filters)))
-           
+
         self.encoded = None
         
         self.decoding_layers = nn.ModuleList()
