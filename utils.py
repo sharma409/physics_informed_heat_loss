@@ -88,3 +88,13 @@ def makeGrowingSamples(image_size):
         size *= 2
 
     return samps_0, sols_0, samps_1, sols_1
+
+
+def boundaryPlot(img):
+    r,c = img.shape
+    img = np.copy(img)
+    img[-20:-1,:] = img[-1,int(c/2.0)]
+    img[1:21,:] = img[0,int(c/2.0)]
+    img[:,1:21] = img[int(r/2.0), 0]
+    img[:,-20:-1] = img[int(r/2.0),-1]
+    return img

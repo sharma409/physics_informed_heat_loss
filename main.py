@@ -11,10 +11,14 @@ import os
 from glob import glob
 
 import numpy as np
+import PIL
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
+plt.ioff()
 
 from networks import UNet
-from utils import makeSamples, plotSamples
+from utils import makeSamples, plotSamples, boundaryPlot
 from solve import solve
 
 parser = argparse.ArgumentParser()
@@ -148,26 +152,14 @@ def runTest(net):
 
         error.append(np.mean(np.abs(output-solution))) 
         print("%d Error: %.2f, Loss: %.2f" % (i, error[-1], loss.data[0]))
-        # Plot real samples
-        plt.figure(figsize=(15, 25))
-        XX, YY = np.meshgrid(np.arange(0, opt.image_size), np.arange(0, opt.image_size))
-        plt.subplot(3,1,1)
-        plt.imshow(data.cpu().numpy()[0,0,:,:], vmin=0, vmax=100, cmap=plt.cm.jet)
-        plt.title("Initial Condition")
-        plt.axis('equal')
-        plt.subplot(3,1,2)
-        plt.imshow(solution, vmin=0, vmax=100, cmap=plt.cm.jet)
-        plt.title("Equilibrium Condition")
-        plt.axis('equal')
-        plt.subplot(3,1,3)
-        plt.imshow(output, vmin=0, vmax=100, cmap=plt.cm.jet)
-        plt.title("Learned Output")
-        plt.axis('equal')
-        plt.savefig('%s/test_%d.png' % (opt.experiment, i))
-        plt.close()
+
+        # Plot
+        imgs_comb = np.hstack((boundaryPlot(data.cpu().numpy()[0,0,:,:]), solution, output))
+        plt.imsave(fname='%s/test_%d.png' % (opt.experiment, i), arr=imgs_comb, vmin=0, vmax=100, cmap=plt.cm.jet)
 
     error = np.array(error)
     print("error: ", np.mean(error))
+    print("std dev: ", np.std(error))
 
 if __name__ == '__main__':
     main()

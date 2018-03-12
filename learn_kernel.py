@@ -11,7 +11,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
-parser.add_argument('--size', type=int, default=32, help='size of image')
+parser.add_argument('--size', type=int, default=8, help='size of image')
 
 opt = parser.parse_args()
 print(opt)
@@ -41,7 +41,7 @@ def PhysicalLoss():
 
 net = kernel().type(dtype)
 
-learning_rate = 2e-4
+learning_rate = 1e-4
 optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 physical_loss = PhysicalLoss()
 
